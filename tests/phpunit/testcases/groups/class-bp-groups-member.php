@@ -4,14 +4,14 @@
  * @group BP_Groups_Member
  */
 class BP_Tests_BP_Groups_Member_TestCases extends BP_UnitTestCase {
-	public static function invite_user_to_group( $user_id, $group_id, $inviter_id ) {
+	public static function invite_user_to_group( $user_id, $group_id, $inviter_id, $draft = false ) {
 		$invite                = new BP_Groups_Member;
 		$invite->group_id      = $group_id;
 		$invite->user_id       = $user_id;
 		$invite->date_modified = bp_core_current_time();
 		$invite->inviter_id    = $inviter_id;
 		$invite->is_confirmed  = 0;
-		$invite->invite_sent   = 1;
+		$invite->invite_sent   = $draft ? 0 : 1;
 
 		$invite->save();
 		return $invite->id;
@@ -1203,5 +1203,348 @@ class BP_Tests_BP_Groups_Member_TestCases extends BP_UnitTestCase {
 	 */
 	public function test_total_group_count_should_return_integer() {
 		$this->assertInternalType( 'int', BP_Groups_Member::total_group_count( 123 ) );
+	}
+
+	/**
+	 * @group groups_send_single_invite
+	 * @group group_invitations
+	 * @group group_membership
+	 */
+	public function test_groups_send_single_invite() {
+		$g1 = $this->factory->group->create();
+		$u1 = $this->factory->user->create();
+		$u2 = $this->factory->user->create();
+		self::add_user_to_group( $u1, $g1 );
+
+		// Test expected functionality
+		self::invite_user_to_group( $u2, $g1, $u1, $draft = true );
+		$this->assertTrue( is_null( groups_check_user_has_invite( $u2, $g1, $type = 'sent' ) ) );
+
+		$success = groups_send_single_invite( $g1, $u2, $u1 );
+
+		$this->assertTrue( $success );
+		$this->assertTrue( is_numeric( groups_check_user_has_invite( $u2, $g1, $type = 'sent' ) ) );
+		unset( $success );
+
+	}
+
+	/**
+	 * @group groups_send_single_invite
+	 * @group group_invitations
+	 * @group group_membership
+	 */
+	public function test_groups_send_single_invite_no_invite() {
+		$g1 = $this->factory->group->create();
+		$u1 = $this->factory->user->create();
+		$u2 = $this->factory->user->create();
+		self::add_user_to_group( $u1, $g1 );
+
+		// Test when user doesn't have invitation.
+		$this->assertTrue( is_null( groups_check_user_has_invite( $u2, $g1, $type = 'sent' ) ) );
+
+		$success = groups_send_single_invite( $g1, $u2, $u1 );
+
+		$this->assertFalse( $success );
+		unset( $success );
+	}
+
+	/**
+	 * @group groups_send_single_invite
+	 * @group group_invitations
+	 * @group group_membership
+	 */
+	public function test_groups_send_single_invite_has_request() {
+		$g1 = $this->factory->group->create();
+		$u1 = $this->factory->user->create();
+		$u2 = $this->factory->user->create();
+		self::add_user_to_group( $u1, $g1 );
+
+		// Test when user has submitted a request for membership, but has not been invited
+		self::create_group_membership_request( $u2, $g1 );
+		$this->assertTrue( is_numeric( groups_check_for_membership_request( $u2, $g1 ) ) );
+		$this->assertTrue( is_null( groups_check_user_has_invite( $u2, $g1, $type = 'all' ) ) );
+
+		$success = groups_send_single_invite( $g1, $u2, $u1 );
+
+		$this->assertFalse( $success );
+		unset( $success );
+	}
+
+	/**
+	 * @group groups_send_single_invite
+	 * @group group_invitations
+	 * @group group_membership
+	 */
+	public function test_groups_send_single_invite_already_member() {
+		$g1 = $this->factory->group->create();
+		$u1 = $this->factory->user->create();
+		$u2 = $this->factory->user->create();
+		self::add_user_to_group( $u1, $g1 );
+
+		// Test when user already belongs to the group
+		self::add_user_to_group( $u2, $g1 );
+		$success = groups_send_single_invite( $g1, $u2, $u1 );
+
+		$this->assertFalse( $success );
+		unset( $success );
+	}
+
+	/**
+	 * @group groups_send_single_invite
+	 * @group group_invitations
+	 * @group group_membership
+	 */
+	public function test_groups_send_single_invite_no_group() {
+		$g1 = $this->factory->group->create();
+		$u1 = $this->factory->user->create();
+		$u2 = $this->factory->user->create();
+		self::add_user_to_group( $u1, $g1 );
+
+		// Test when group isn't specified
+		$success = groups_send_single_invite( null, $u2, $u1 );
+
+		$this->assertFalse( $success );
+		unset( $success );
+	}
+
+	/**
+	 * @group groups_send_single_invite
+	 * @group group_invitations
+	 * @group group_membership
+	 */
+	public function test_groups_send_single_invite_user_empty() {
+		$g1 = $this->factory->group->create();
+		$u1 = $this->factory->user->create();
+		self::add_user_to_group( $u1, $g1 );
+
+		// Test when user isn't specified
+		$success = groups_send_single_invite( $g1, null, $u1 );
+
+		$this->assertFalse( $success );
+		unset( $success );
+	}
+
+	/**
+	 * @group groups_send_single_invite
+	 * @group group_invitations
+	 * @group group_membership
+	 */
+	public function test_groups_send_single_invite_bad_group_param() {
+		$g1 = $this->factory->group->create();
+		$u1 = $this->factory->user->create();
+		$u2 = $this->factory->user->create();
+		self::add_user_to_group( $u1, $g1 );
+
+		// Test when group doesn't exist: Bad group ID
+		$success = groups_send_single_invite( 457819810, $u2, $u1 );
+
+		$this->assertFalse( $success );
+		unset( $success );
+	}
+
+	/**
+	 * @group groups_send_single_invite
+	 * @group group_invitations
+	 * @group group_membership
+	 */
+	public function test_groups_send_single_invite_bad_invitee_id() {
+		$g1 = $this->factory->group->create();
+		$u1 = $this->factory->user->create();
+		self::add_user_to_group( $u1, $g1 );
+
+		// Test when group doesn't exist: Bad invitee ID
+		$success = groups_send_single_invite( $g1, 47161302, $u1 );
+
+		$this->assertFalse( $success );
+		unset( $success );
+	}
+
+	/**
+	 * @group groups_send_single_invite
+	 * @group group_invitations
+	 * @group group_membership
+	 */
+	public function test_groups_send_single_invite_bad_inviter_id() {
+		$g1 = $this->factory->group->create();
+		$u1 = $this->factory->user->create();
+		$u2 = $this->factory->user->create();
+		self::add_user_to_group( $u1, $g1 );
+
+		// Bad inviter ID
+		$success = groups_send_single_invite( $g1, $u2, 472816989 );
+
+		$this->assertFalse( $success );
+		unset( $success );
+	}
+
+	/**
+	 * @group groups_send_invites
+	 * @group group_invitations
+	 * @group group_membership
+	 */
+	public function test_groups_send_invites_expected_behavior() {
+		$g1 = $this->factory->group->create();
+		$u1 = $this->factory->user->create();
+		$u2 = $this->factory->user->create();
+		$u3 = $this->factory->user->create();
+		self::add_user_to_group( $u1, $g1 );
+
+		// Test expected functionality
+		// Create some draft invitations that we can send
+		self::invite_user_to_group( $u2, $g1, $u1, $draft = true );
+		self::invite_user_to_group( $u3, $g1, $u1, $draft = true );
+
+		$success = groups_send_invites( $u1, $g1 );
+
+		$this->assertTrue( $success );
+	}
+
+	/**
+	 * @group groups_send_invites
+	 * @group group_invitations
+	 * @group group_membership
+	 */
+	public function test_groups_send_invites_none_to_send() {
+		$g1 = $this->factory->group->create();
+		$u1 = $this->factory->user->create();
+		self::add_user_to_group( $u1, $g1 );
+
+		// User has no outstanding invites to send.
+		$success = groups_send_invites( $u1, $g1 );
+
+		$this->assertTrue( $success );
+	}
+
+	/**
+	 * @group groups_send_invites
+	 * @group group_invitations
+	 * @group group_membership
+	 */
+	public function test_groups_send_invites_not_a_group_member() {
+		$g1 = $this->factory->group->create();
+		$u1 = $this->factory->user->create();
+
+		// User doesn't belong to group.
+		$success = groups_send_invites( $u1, $g1 );
+
+		$this->assertFalse( $success );
+	}
+
+	/**
+	 * @group groups_send_invites
+	 * @group group_invitations
+	 * @group group_membership
+	 */
+	public function test_groups_send_invites_use_current_user() {
+		$g1 = $this->factory->group->create();
+		$u1 = $this->factory->user->create();
+		$u2 = $this->factory->user->create();
+		$u3 = $this->factory->user->create();
+		$old_current_user = get_current_user_id();
+		self::add_user_to_group( $u1, $g1 );
+
+		// Create some draft invitations that we can send
+		self::invite_user_to_group( $u2, $g1, $u1, $draft = true );
+		self::invite_user_to_group( $u3, $g1, $u1, $draft = true );
+
+		// Test when user/group isn't specified
+		// User isn't specified, but current user does have outstanding invites.
+		$this->set_current_user( $u1 );
+
+		$success = groups_send_invites( null, $g1 );
+
+		$this->assertTrue( $success );
+		$this->set_current_user( $old_current_user );
+	}
+
+	/**
+	 * @group groups_send_invites
+	 * @group group_invitations
+	 * @group group_membership
+	 */
+	public function test_groups_send_invites_empty_group() {
+		$g1 = $this->factory->group->create();
+		$u1 = $this->factory->user->create();
+		$u2 = $this->factory->user->create();
+		$u3 = $this->factory->user->create();
+		self::add_user_to_group( $u1, $g1 );
+
+		// Create some draft invitations that we can send
+		self::invite_user_to_group( $u2, $g1, $u1, $draft = true );
+		self::invite_user_to_group( $u3, $g1, $u1, $draft = true );
+
+		// Group isn't specified, we're not in a group context
+		$success = groups_send_invites( $u1, null );
+
+		$this->assertFalse( $success );
+	}
+
+	/**
+	 * @group groups_send_invites
+	 * @group group_invitations
+	 * @group group_membership
+	 */
+	public function test_groups_send_invites_empty_group_in_group() {
+		$g1 = $this->factory->group->create();
+		$g1_obj = groups_get_group( array( 'group_id' => $g1 ) );
+		$u1 = $this->factory->user->create();
+		$u2 = $this->factory->user->create();
+		$u3 = $this->factory->user->create();
+		self::add_user_to_group( $u1, $g1 );
+
+		// Create some draft invitations that we can send
+		self::invite_user_to_group( $u2, $g1, $u1, $draft = true );
+		self::invite_user_to_group( $u3, $g1, $u1, $draft = true );
+
+		// Group isn't specified, we are in a group context
+		$this->go_to( bp_get_group_permalink( $g1_obj ) );
+
+		$success = groups_send_invites( $u1, null );
+
+		$this->assertTrue( $success );
+	}
+
+	/**
+	 * @group groups_send_invites
+	 * @group group_invitations
+	 * @group group_membership
+	 */
+	public function test_groups_send_invites_bad_user_param() {
+		$g1 = $this->factory->group->create();
+		$u1 = $this->factory->user->create();
+		$u2 = $this->factory->user->create();
+		$u3 = $this->factory->user->create();
+		self::add_user_to_group( $u1, $g1 );
+
+		// Create some draft invitations that we can send
+		self::invite_user_to_group( $u2, $g1, $u1, $draft = true );
+		self::invite_user_to_group( $u3, $g1, $u1, $draft = true );
+
+		// Test when user/group doesn't exist: Bad user ID
+		$success = groups_send_invites( 569845135, $g1 );
+
+		$this->assertFalse( $success );
+	}
+
+	/**
+	 * @group groups_send_invites
+	 * @group group_invitations
+	 * @group group_membership
+	 */
+	public function test_groups_send_invites_bad_group_param() {
+		$g1 = $this->factory->group->create();
+		$u1 = $this->factory->user->create();
+		$u2 = $this->factory->user->create();
+		$u3 = $this->factory->user->create();
+		self::add_user_to_group( $u1, $g1 );
+
+		// Create some draft invitations that we can send
+		self::invite_user_to_group( $u2, $g1, $u1, $draft = true );
+		self::invite_user_to_group( $u3, $g1, $u1, $draft = true );
+
+		// Bad group ID
+		$success = groups_send_invites( $u1, 586234125 );
+
+		$this->assertFalse( $success );
 	}
 }

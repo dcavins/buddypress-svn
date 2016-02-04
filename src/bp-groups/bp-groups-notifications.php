@@ -249,16 +249,32 @@ add_action( 'groups_promoted_member', 'groups_notification_promoted_member', 10,
  * @param BP_Groups_Group  $group           Group object.
  * @param BP_Groups_Member $member          Member object.
  * @param int              $inviter_user_id ID of the user who sent the invite.
+ * @param bool             $resend          Whether to resend notification email if already sent.
+ *
+ * @return bool False on failure, true if success or nothing needed to be done.
  */
-function groups_notification_group_invites( &$group, &$member, $inviter_user_id ) {
+function groups_notification_group_invites( &$group, &$member, $inviter_user_id, $resend = false ) {
 
-	// Bail if member has already been invited.
-	if ( ! empty( $member->invite_sent ) ) {
-		return;
+	// Bail if the group and member objects are not populated.
+	if ( empty( $group->id ) || empty( $member->id ) ) {
+		return false;
 	}
 
+	// Bail if the passed $inviter_user_id isn't the inviter as recorded in the BP_Groups_Member object.
+	// @TODO: This will be resolved by #5911's change to groups_check_user_has_invite()
+	if ( $inviter_user_id != $member->inviter_id ) {
+		return false;
+	}
+
+	// Bail if member has already been invited and $resend isn't specified.
+	if ( ! $resend && ! empty( $member->invite_sent ) ) {
+		return true;
+ 	}
+
 	// @todo $inviter_ud may be used for caching, test without it
-	$inviter_ud      = bp_core_get_core_userdata( $inviter_user_id );
+	$inviter_ud   = bp_core_get_core_userdata( $inviter_user_id );
+
+	// Set up the ID for the invited user.
 	$invited_user_id = $member->user_id;
 
 	// Trigger a BuddyPress Notification.
@@ -282,7 +298,7 @@ function groups_notification_group_invites( &$group, &$member, $inviter_user_id 
 			'group'                => $group,
 			'group.url'            => bp_get_group_permalink( $group ),
 			'group.name'           => $group->name,
-			'inviter-profile.id'   => $invited_user_id,
+			'inviter-profile.id'   => $inviter_user_id,
 			'inviter-profile.name' => bp_core_get_userlink( $inviter_user_id, true, false, true ),
 			'inviter-profile.url'  => bp_core_get_user_domain( $inviter_user_id ),
 			'invites.url'          => esc_url( $invited_link . '/invites/' ),
